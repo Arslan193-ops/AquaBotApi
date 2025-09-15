@@ -1,4 +1,5 @@
-﻿using AquaBotApi.Models;
+﻿using AquaBotApi.Models.DTOs;
+using AquaBotApi.Models;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
@@ -22,10 +23,10 @@ namespace AquaBotApi.Controllers
         }
 
         [HttpPost("register")]
-        public async Task<IActionResult> Register(string email, string password)
+        public async Task<IActionResult> Register(RegisterDto dto)
         {
-            var user = new ApplicationUser { UserName = email, Email = email };
-            var result = await _userManager.CreateAsync(user, password);
+            var user = new ApplicationUser { UserName = dto.Email, Email = dto.Email };
+            var result = await _userManager.CreateAsync(user, dto.Password);
 
             if (!result.Succeeded) return BadRequest(result.Errors);
 
@@ -33,10 +34,10 @@ namespace AquaBotApi.Controllers
         }
 
         [HttpPost("login")]
-        public async Task<IActionResult> Login(string email, string password)
+        public async Task<IActionResult> Login(LoginDto dto)
         {
-            var user = await _userManager.FindByEmailAsync(email);
-            if (user == null || !await _userManager.CheckPasswordAsync(user, password))
+            var user = await _userManager.FindByEmailAsync(dto.Email);
+            if (user == null || !await _userManager.CheckPasswordAsync(user, dto.Password))
                 return Unauthorized();
 
             var claims = new[]
