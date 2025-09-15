@@ -23,5 +23,7 @@ namespace AquaBotApi.Models
 
         [ForeignKey("UserId")]
         public ApplicationUser User { get; set; }
+        public double? Temperature { get; set; }
+        public int? Humidity { get; set; }
     }
 }

@@ -1,5 +1,6 @@
 using AquaBotApi.Data;
 using AquaBotApi.Models;
+using AquaBotApi.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -8,6 +9,8 @@ using Microsoft.OpenApi.Models;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
+
+
 
 // DbContext
 builder.Services.AddDbContext<AppDbContext>(options =>
@@ -41,7 +44,9 @@ builder.Services.AddAuthentication(options =>
             Encoding.UTF8.GetBytes(jwtKey))
     };
 });
-
+builder.Services.AddHttpClient<WeatherService>();
+builder.Services.AddScoped<WaterCalculationService>();
+// Controllers and Swagger
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
@@ -73,6 +78,9 @@ builder.Services.AddSwaggerGen(c =>
         }
     });
 });
+
+
+
 
 var app = builder.Build();
 
