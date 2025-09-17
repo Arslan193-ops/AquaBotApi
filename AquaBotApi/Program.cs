@@ -1,4 +1,4 @@
-using AquaBotApi.Data;
+﻿using AquaBotApi.Data;
 using AquaBotApi.Models;
 using AquaBotApi.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -46,6 +46,9 @@ builder.Services.AddAuthentication(options =>
 });
 builder.Services.AddHttpClient<WeatherService>();
 builder.Services.AddScoped<WaterCalculationService>();
+builder.Services.AddScoped<ImageAnalysisService>();
+builder.Services.AddScoped<ImageAnalysisService>(); // ✅ Image analysis
+builder.Services.AddScoped<EnhancedWaterCalculationService>(); // ✅ Enhanced calculations
 // Controllers and Swagger
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
@@ -78,8 +81,6 @@ builder.Services.AddSwaggerGen(c =>
         }
     });
 });
-
-
 
 
 var app = builder.Build();
