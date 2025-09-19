@@ -1,11 +1,9 @@
-﻿// Services/ImageAnalysisService.cs
-using AquaBotApi.Models;
+﻿using AquaBotApi.Models;
 using AquaBotApi.Models.DTOs;
 using OpenCvSharp;
-using System;
-using System.Drawing;
-using System.Drawing.Imaging;
-using System.Runtime.Versioning;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
 
 namespace AquaBotApi.Services
 {
@@ -25,11 +23,11 @@ namespace AquaBotApi.Services
         {
             try
             {
-                using var stream = imageFile.OpenReadStream();
-                using var bitmap = new Bitmap(stream);
+                // ✅ Load with ImageSharp (cross-platform)
+                using var image = await Image.LoadAsync<Rgb24>(imageFile.OpenReadStream());
 
-                // Convert to OpenCV Mat
-                var mat = BitmapToMat(bitmap);
+                // Convert ImageSharp → OpenCV Mat
+                using var mat = ImageToMat(image);
 
                 // Perform analysis
                 var colorAnalysis = AnalyzeColors(mat);
@@ -47,7 +45,6 @@ namespace AquaBotApi.Services
                     Recommendations = GenerateRecommendations(soilCondition, cropHealth)
                 };
 
-                mat.Dispose();
                 return result;
             }
             catch (Exception ex)
@@ -57,40 +54,52 @@ namespace AquaBotApi.Services
             }
         }
 
+        // ✅ ImageSharp → OpenCvSharp.Mat
+        private Mat ImageToMat(Image<Rgb24> image)
+        {
+            var mat = new Mat(image.Height, image.Width, MatType.CV_8UC3);
+            image.ProcessPixelRows(accessor =>
+            {
+                for (int y = 0; y < image.Height; y++)
+                {
+                    var row = accessor.GetRowSpan(y);
+                    for (int x = 0; x < image.Width; x++)
+                    {
+                        var pixel = row[x];
+                        mat.Set(y, x, new Vec3b(pixel.B, pixel.G, pixel.R)); // OpenCV = BGR
+                    }
+                }
+            });
+            return mat;
+        }
+
         /// <summary>
         /// Analyze color composition of the image
         /// </summary>
         private ColorAnalysis AnalyzeColors(Mat image)
         {
-            // Convert to HSV for better color analysis
             using var hsv = new Mat();
             Cv2.CvtColor(image, hsv, ColorConversionCodes.BGR2HSV);
 
             var analysis = new ColorAnalysis();
 
-            // Calculate average brightness (V channel in HSV)
+            // Average brightness
             var channels = hsv.Split();
-            using var vChannel = channels[2]; // Value channel
+            using var vChannel = channels[2];
             analysis.AvgBrightness = Cv2.Mean(vChannel).Val0;
 
-            // Analyze color ranges
+            // Percentages
             analysis.GreenPercentage = CalculateGreenPercentage(hsv);
             analysis.BrownPercentage = CalculateBrownPercentage(hsv);
             analysis.DarkSoilPercentage = CalculateDarkSoilPercentage(hsv);
 
-            // Dispose channels
-            foreach (var channel in channels)
-                channel.Dispose();
+            foreach (var channel in channels) channel.Dispose();
 
             return analysis;
         }
 
-        /// <summary>
-        /// Calculate percentage of green pixels (vegetation)
-        /// </summary>
         private double CalculateGreenPercentage(Mat hsvImage)
         {
-            // Green hue range: 40-80 (in OpenCV HSV: 0-179)
             var lowerGreen = new Scalar(40, 40, 40);
             var upperGreen = new Scalar(80, 255, 255);
 
@@ -103,12 +112,8 @@ namespace AquaBotApi.Services
             return (double)greenPixels / totalPixels * 100;
         }
 
-        /// <summary>
-        /// Calculate percentage of brown/soil colored pixels
-        /// </summary>
         private double CalculateBrownPercentage(Mat hsvImage)
         {
-            // Brown hue range: 10-20 (soil colors)
             var lowerBrown = new Scalar(10, 30, 20);
             var upperBrown = new Scalar(25, 255, 200);
 
@@ -121,14 +126,10 @@ namespace AquaBotApi.Services
             return (double)brownPixels / totalPixels * 100;
         }
 
-        /// <summary>
-        /// Calculate percentage of dark soil (potentially moist)
-        /// </summary>
         private double CalculateDarkSoilPercentage(Mat hsvImage)
         {
-            // Dark soil: low brightness values
             var lowerDark = new Scalar(0, 0, 0);
-            var upperDark = new Scalar(179, 255, 80); // Low V value = dark
+            var upperDark = new Scalar(179, 255, 80);
 
             using var mask = new Mat();
             Cv2.InRange(hsvImage, lowerDark, upperDark, mask);
@@ -139,15 +140,11 @@ namespace AquaBotApi.Services
             return (double)darkPixels / totalPixels * 100;
         }
 
-        /// <summary>
-        /// Determine soil condition based on color analysis
-        /// </summary>
         private (string Condition, int Moisture) DetermineSoilCondition(ColorAnalysis analysis)
         {
             var moisture = 0;
             var condition = "Unknown";
 
-            // Logic: Darker soil = more moisture, lighter = drier
             if (analysis.DarkSoilPercentage > 60 && analysis.AvgBrightness < 50)
             {
                 condition = "Wet";
@@ -169,15 +166,10 @@ namespace AquaBotApi.Services
                 moisture = (int)(50 + (80 - analysis.AvgBrightness) / 3);
             }
 
-            // Clamp moisture between 0-100
             moisture = Math.Max(0, Math.Min(100, moisture));
-
             return (condition, moisture);
         }
 
-        /// <summary>
-        /// Determine crop health based on green vegetation analysis
-        /// </summary>
         private (string Health, double Confidence) DetermineCropHealth(ColorAnalysis analysis)
         {
             if (analysis.GreenPercentage > 60)
@@ -192,12 +184,8 @@ namespace AquaBotApi.Services
                 return ("No Crop Detected", 40.0);
         }
 
-        /// <summary>
-        /// Simple crop type detection based on green patterns
-        /// </summary>
         private string DetectCropType(ColorAnalysis analysis)
         {
-            // This is a simplified detection - in reality you'd need more sophisticated analysis
             if (analysis.GreenPercentage > 50)
                 return "Leafy Crop";
             else if (analysis.GreenPercentage > 20)
@@ -206,14 +194,9 @@ namespace AquaBotApi.Services
                 return "Soil/Fallow";
         }
 
-        /// <summary>
-        /// Calculate overall confidence in analysis
-        /// </summary>
         private double CalculateConfidence(ColorAnalysis analysis)
         {
-            // Higher confidence when we have clear color patterns
-            var confidence = 60.0; // Base confidence
-
+            var confidence = 60.0;
             if (analysis.GreenPercentage > 30 || analysis.BrownPercentage > 40)
                 confidence += 20;
 
@@ -223,16 +206,12 @@ namespace AquaBotApi.Services
             return Math.Min(95.0, confidence);
         }
 
-        /// <summary>
-        /// Generate recommendations based on analysis
-        /// </summary>
         private string GenerateRecommendations(
             (string Condition, int Moisture) soil,
             (string Health, double Confidence) crop)
         {
             var recommendations = new List<string>();
 
-            // Soil-based recommendations
             if (soil.Condition == "Dry" || soil.Moisture < 30)
             {
                 recommendations.Add("🚿 Immediate irrigation recommended");
@@ -249,7 +228,6 @@ namespace AquaBotApi.Services
                 recommendations.Add("📅 Check again in 2-3 days");
             }
 
-            // Crop-based recommendations
             if (crop.Health == "Stressed" || crop.Health == "Poor")
             {
                 recommendations.Add("🌱 Consider fertilizer application");
@@ -263,36 +241,8 @@ namespace AquaBotApi.Services
 
             return string.Join(" | ", recommendations);
         }
-
-        /// <summary>
-        /// Convert System.Drawing.Bitmap to OpenCvSharp.Mat
-        /// </summary>
-        [SupportedOSPlatform("windows6.1")]
-        private Mat BitmapToMat(Bitmap bitmap)
-        {
-            // Use Mat.FromPixelData to avoid obsolete constructor and platform-specific BitmapData.Scan0
-            var rect = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
-            var bmpData = bitmap.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
-            try
-            {
-                // Use FromPixelData instead of the obsolete constructor
-                return Mat.FromPixelData(
-                    bitmap.Height,
-                    bitmap.Width,
-                    MatType.CV_8UC3,
-                    bmpData.Scan0
-                );
-            }
-            finally
-            {
-                bitmap.UnlockBits(bmpData);
-            }
-        }
     }
 
-    /// <summary>
-    /// Internal class for color analysis results
-    /// </summary>
     internal class ColorAnalysis
     {
         public double AvgBrightness { get; set; }

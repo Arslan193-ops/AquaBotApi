@@ -1,5 +1,10 @@
 ﻿namespace AquaBotApi.Services
 {
+    /// <summary>
+    /// ⚠️ Legacy: use only for offline or fallback scenarios.
+    /// </summary>
+    [Obsolete("Use EnhancedWaterCalculationService for full recommendations. Keep this for offline/fallback.")]
+
     public class WaterCalculationService
     {
         /// <summary>

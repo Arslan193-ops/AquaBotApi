@@ -15,9 +15,12 @@ namespace AquaBotApi.Controllers
     {
         private readonly AppDbContext _context;
         private readonly WeatherService _weatherService;
-        private readonly WaterCalculationService _waterService;
+        private readonly EnhancedWaterCalculationService _waterService;
 
-        public WaterController(AppDbContext context, WeatherService weatherService, WaterCalculationService waterService)
+        public WaterController(
+            AppDbContext context,
+            WeatherService weatherService,
+            EnhancedWaterCalculationService waterService)
         {
             _context = context;
             _weatherService = weatherService;
@@ -30,16 +33,16 @@ namespace AquaBotApi.Controllers
         {
             var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
 
-            // ✅ Manual validation for field area
+            // ✅ Validation
             if (dto.FieldAreaM2.HasValue && dto.FieldAreaM2 <= 0)
             {
                 return BadRequest("Field area must be greater than 0.");
             }
 
-            // Fetch weather
+            // 🌦 Fetch weather
             var weather = await _weatherService.GetWeatherAsync("Lahore");
 
-            // Save soil + weather snapshot
+            // 📝 Save soil + weather snapshot in DB
             var soil = new SoilData
             {
                 Condition = dto.Condition,
@@ -52,19 +55,23 @@ namespace AquaBotApi.Controllers
             _context.SoilDatas.Add(soil);
             await _context.SaveChangesAsync();
 
-            // Calculate recommendation
-            var perSquare = _waterService.Calculate(
-                soil.MoisturePercentage,
-                soil.Temperature,
-                soil.Humidity
+            // 🔥 Use EnhancedWaterCalculationService
+            var imageLikeData = new ImageAnalysisDto
+            {
+                SoilCondition = dto.Condition,
+                EstimatedMoisture = dto.MoisturePercentage,
+                CropHealth = "Unknown", // no image input
+                Confidence = 50
+            };
+
+            var recommendation = await _waterService.CalculateFromImageAndWeatherAsync(
+                imageLikeData,
+                "Lahore",
+                dto.CropType,
+                dto.FieldAreaM2
             );
 
-            double? total = null;
-            if (dto.FieldAreaM2.HasValue)
-            {
-                total = Math.Round(perSquare * dto.FieldAreaM2.Value, 1);
-            }
-
+            // 📤 Return enriched response
             return Ok(new
             {
                 soil.Id,
@@ -73,11 +80,8 @@ namespace AquaBotApi.Controllers
                 soil.Temperature,
                 soil.Humidity,
                 soil.CreatedAt,
-                WaterNeededPerSquareMeter = $"{perSquare} L/m²",
-                FieldAreaM2 = dto.FieldAreaM2,
-                TotalWaterNeeded = total.HasValue ? $"{total} L" : null
+                WaterRecommendation = recommendation
             });
         }
-
     }
 }

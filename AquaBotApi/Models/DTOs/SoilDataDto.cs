@@ -1,5 +1,4 @@
-﻿
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 
 namespace AquaBotApi.Models.DTOs
@@ -7,7 +6,6 @@ namespace AquaBotApi.Models.DTOs
     public class SoilDataDto
     {
         [Required]
-        [StringLength(50)]
         public string Condition { get; set; }
 
         [Range(0, 100)]
@@ -15,5 +13,7 @@ namespace AquaBotApi.Models.DTOs
 
         [DefaultValue(null)]
         public double? FieldAreaM2 { get; set; }
+        
+        public string CropType { get; set; } // Added property to fix CS1061
     }
 }
