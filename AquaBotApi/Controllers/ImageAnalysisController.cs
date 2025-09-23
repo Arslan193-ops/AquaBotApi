@@ -128,10 +128,9 @@ namespace AquaBotApi.Controllers
             return Ok(history);
         }
 
-        /// <summary>
         /// Get specific analysis details
         /// GET: api/imageanalysis/{id}
-        /// </summary>
+       
         [HttpGet("{id}")]
         public IActionResult GetAnalysisById(int id)
         {
