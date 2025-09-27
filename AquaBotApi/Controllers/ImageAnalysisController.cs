@@ -1,6 +1,7 @@
 ﻿using AquaBotApi.Data;
 using AquaBotApi.Models;
 using AquaBotApi.Models.DTOs;
+using AquaBotApi.Service;
 using AquaBotApi.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -16,27 +17,27 @@ namespace AquaBotApi.Controllers
     public class ImageAnalysisController : ControllerBase
     {
         private readonly AppDbContext _context;
-        private readonly ImageAnalysisService _imageAnalysisService;
+        private readonly OnnxImageAnalysisService _onnxImageAnalysisService;
         private readonly EnhancedWaterCalculationService _enhancedWaterCalculationService;
         private readonly IWebHostEnvironment _environment;
         private readonly ILogger<ImageAnalysisController> _logger;
 
         public ImageAnalysisController(
             AppDbContext context,
-            ImageAnalysisService imageAnalysisService,
+            OnnxImageAnalysisService onnxImageAnalysisService,   // ✅ switched to ONNX
             EnhancedWaterCalculationService enhancedWaterCalculationService,
             IWebHostEnvironment environment,
             ILogger<ImageAnalysisController> logger)
         {
             _context = context;
-            _imageAnalysisService = imageAnalysisService;
+            _onnxImageAnalysisService = onnxImageAnalysisService;
             _enhancedWaterCalculationService = enhancedWaterCalculationService;
             _environment = environment;
             _logger = logger;
         }
 
         /// <summary>
-        /// Upload and analyze soil/crop image with enhanced weather-based calculations
+        /// Upload and analyze soil/crop image with ML + weather-based calculations
         /// POST: api/imageanalysis/analyze
         /// </summary>
         [HttpPost("analyze")]
@@ -59,10 +60,15 @@ namespace AquaBotApi.Controllers
                 double? fieldArea = (dto.FieldArea.HasValue && dto.FieldArea.Value > 0) ? dto.FieldArea : null;
 
                 var fileName = await SaveUploadedImageAsync(dto.Image);
-                var analysisResult = await _imageAnalysisService.AnalyzeImageAsync(dto.Image, dto.CropType);
+
+                // ✅ Use ONNX model for image analysis
+                var analysisResult = _onnxImageAnalysisService.AnalyzeImage(dto.Image, dto.CropType);
+
+                // ✅ Add weather-based recommendation
                 var enhancedRecommendation = await _enhancedWaterCalculationService
                     .CalculateFromImageAndWeatherAsync(analysisResult, "Lahore", dto.CropType ?? string.Empty, fieldArea);
 
+                // ✅ Save record in DB
                 var dbRecord = new ImageAnalysisResult
                 {
                     UserId = userId!,
@@ -81,7 +87,7 @@ namespace AquaBotApi.Controllers
                 return Ok(new ImageAnalysisResponseDto
                 {
                     Success = true,
-                    Message = "Image analyzed with weather data successfully",
+                    Message = "Image analyzed with weather data successfully (ML model)",
                     ImageId = dbRecord.Id,
                     ImageUrl = imageUrl,
                     ImageAnalysis = analysisResult,
@@ -90,7 +96,7 @@ namespace AquaBotApi.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error analyzing image");
+                _logger.LogError(ex, "Error analyzing image with ONNX model");
                 return StatusCode(500, new ImageAnalysisResponseDto
                 {
                     Success = false,
@@ -98,7 +104,6 @@ namespace AquaBotApi.Controllers
                 });
             }
         }
-
 
         /// <summary>
         /// Get user's image analysis history
@@ -128,9 +133,10 @@ namespace AquaBotApi.Controllers
             return Ok(history);
         }
 
+        /// <summary>
         /// Get specific analysis details
         /// GET: api/imageanalysis/{id}
-       
+        /// </summary>
         [HttpGet("{id}")]
         public IActionResult GetAnalysisById(int id)
         {
@@ -157,7 +163,7 @@ namespace AquaBotApi.Controllers
         }
 
         /// <summary>
-        /// Quick analyze with enhanced weather calculations (not saved in DB)
+        /// Quick analyze with ML + weather calculations (not saved in DB)
         /// POST: api/imageanalysis/quick-analyze
         /// </summary>
         [HttpPost("quick-analyze")]
@@ -168,21 +174,23 @@ namespace AquaBotApi.Controllers
                 if (image == null || image.Length == 0)
                     return BadRequest(new ImageAnalysisResponseDto { Success = false, Message = "No image file provided" });
 
-                var analysisResult = await _imageAnalysisService.AnalyzeImageAsync(image, cropType);
+                // ✅ Use ONNX model
+                var analysisResult = _onnxImageAnalysisService.AnalyzeImage(image, cropType);
+
                 var enhancedRecommendation = await _enhancedWaterCalculationService
                     .CalculateFromImageAndWeatherAsync(analysisResult, "Lahore", cropType ?? string.Empty, fieldArea);
 
                 return Ok(new ImageAnalysisResponseDto
                 {
                     Success = true,
-                    Message = "Quick analysis with weather data completed",
+                    Message = "Quick analysis with weather data completed (ML model)",
                     ImageAnalysis = analysisResult,
                     WaterRecommendation = enhancedRecommendation
                 });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error in quick analysis");
+                _logger.LogError(ex, "Error in quick analysis with ONNX model");
                 return StatusCode(500, new ImageAnalysisResponseDto
                 {
                     Success = false,
@@ -193,9 +201,6 @@ namespace AquaBotApi.Controllers
 
         #region Private Helpers
 
-        /// <summary>
-        /// Save uploaded image using ImageSharp (cross-platform) with optional resize/compression
-        /// </summary>
         private async Task<string> SaveUploadedImageAsync(IFormFile image)
         {
             var uploadsPath = Path.Combine(_environment.WebRootPath ?? "wwwroot", "uploads", "images");
@@ -204,10 +209,8 @@ namespace AquaBotApi.Controllers
             var fileName = $"{Guid.NewGuid()}_{Path.GetFileName(image.FileName)}";
             var filePath = Path.Combine(uploadsPath, fileName);
 
-            // ✅ Load with ImageSharp
             using var imageSharp = await SixLabors.ImageSharp.Image.LoadAsync(image.OpenReadStream());
 
-            // ⚖️ Resize if too large (e.g., > 1920px width)
             const int maxWidth = 1920;
             if (imageSharp.Width > maxWidth)
             {
@@ -218,7 +221,6 @@ namespace AquaBotApi.Controllers
                 }));
             }
 
-            // ✅ Save as JPEG with compression (quality 85%)
             var encoder = new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder
             {
                 Quality = 85
@@ -228,7 +230,6 @@ namespace AquaBotApi.Controllers
 
             return fileName;
         }
-
 
         #endregion
     }

@@ -1,5 +1,6 @@
 ﻿using AquaBotApi.Data;
 using AquaBotApi.Models;
+using AquaBotApi.Service;
 using AquaBotApi.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
@@ -9,8 +10,6 @@ using Microsoft.OpenApi.Models;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
-
-
 
 // DbContext
 builder.Services.AddDbContext<AppDbContext>(options =>
@@ -22,7 +21,6 @@ builder.Services.AddIdentity<ApplicationUser, IdentityRole>()
     .AddDefaultTokenProviders();
 
 // JWT Authentication
-// Fix for CS8604: Ensure the JWT key is not null before using it
 var jwtKey = builder.Configuration["Jwt:Key"];
 if (string.IsNullOrEmpty(jwtKey))
     throw new InvalidOperationException("JWT key configuration 'Jwt:Key' is missing or empty.");
@@ -44,17 +42,17 @@ builder.Services.AddAuthentication(options =>
             Encoding.UTF8.GetBytes(jwtKey))
     };
 });
+
+// ✅ Services
 builder.Services.AddHttpClient<WeatherService>();
-builder.Services.AddScoped<WaterCalculationService>();
-builder.Services.AddScoped<ImageAnalysisService>();
-builder.Services.AddScoped<ImageAnalysisService>(); // ✅ Image analysis
-builder.Services.AddScoped<EnhancedWaterCalculationService>(); // ✅ Enhanced calculations
+builder.Services.AddSingleton<OnnxImageAnalysisService>(); // ML Model
+builder.Services.AddScoped<EnhancedWaterCalculationService>(); // Weather + Water logic
+
 // Controllers and Swagger
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
-    // JWT scheme
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         Name = "Authorization",
@@ -65,7 +63,6 @@ builder.Services.AddSwaggerGen(c =>
         Description = "Enter 'Bearer' followed by a space and your JWT.\n\nExample: Bearer eyJhbGciOiJIUzI1NiIs..."
     });
 
-    // Apply to all endpoints
     c.AddSecurityRequirement(new OpenApiSecurityRequirement
     {
         {
@@ -81,7 +78,6 @@ builder.Services.AddSwaggerGen(c =>
         }
     });
 });
-
 
 var app = builder.Build();
 
