@@ -105,6 +105,34 @@ namespace AquaBotApi.Controllers
             }
         }
 
+        [HttpPost("analyze-simple")]
+        public async Task<ActionResult<FarmerRecommendationDto>> AnalyzeSimple([FromForm] ImageUploadDto dto)
+        {
+            var analysisResult = _onnxImageAnalysisService.AnalyzeImage(dto.Image, dto.CropType);
+            var enhancedRecommendation = await _enhancedWaterCalculationService
+                .CalculateFromImageAndWeatherAsync(analysisResult, "Lahore", dto.CropType ?? string.Empty, dto.FieldArea);
+
+            var farmerDto = new FarmerRecommendationDto
+            {
+                SoilCondition = analysisResult.SoilCondition,
+                CropType = dto.CropType ?? "Unknown",
+                Recommendation = enhancedRecommendation.Recommendation,
+                Urgency = enhancedRecommendation.IrrigationUrgency switch
+                {
+                    IrrigationUrgency.Low => "Low",
+                    IrrigationUrgency.Medium => "Medium",
+                    IrrigationUrgency.High => "High",
+                    IrrigationUrgency.Critical => "Critical",
+                    _ => "Unknown"
+                },
+                WaterPerSquareMeter = enhancedRecommendation.WaterPerSquareMeter,
+                TotalWaterNeeded = enhancedRecommendation.TotalWaterNeeded
+            };
+
+            return Ok(farmerDto);
+        }
+
+
         /// <summary>
         /// Get user's image analysis history
         /// GET: api/imageanalysis/history
