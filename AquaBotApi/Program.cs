@@ -46,6 +46,7 @@ builder.Services.AddAuthentication(options =>
 // ✅ Services
 builder.Services.AddHttpClient<WeatherService>();
 builder.Services.AddSingleton<OnnxImageAnalysisService>(); // ML Model
+builder.Services.AddScoped<ImageAnalysisService>(); // heuristic fallback
 builder.Services.AddScoped<EnhancedWaterCalculationService>(); // Weather + Water logic
 
 // Controllers and Swagger

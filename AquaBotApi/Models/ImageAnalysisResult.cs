@@ -25,7 +25,7 @@ namespace AquaBotApi.Models
         public double AvgBrightness { get; set; }
         public double GreenPercentage { get; set; }
         public double BrownPercentage { get; set; }
-
+        public string? FieldLocation { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         // Navigation

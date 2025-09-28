@@ -18,19 +18,22 @@ namespace AquaBotApi.Controllers
     {
         private readonly AppDbContext _context;
         private readonly OnnxImageAnalysisService _onnxImageAnalysisService;
+        private readonly ImageAnalysisService _heuristicService; // 🔄 fallback
         private readonly EnhancedWaterCalculationService _enhancedWaterCalculationService;
         private readonly IWebHostEnvironment _environment;
         private readonly ILogger<ImageAnalysisController> _logger;
 
         public ImageAnalysisController(
             AppDbContext context,
-            OnnxImageAnalysisService onnxImageAnalysisService,   // ✅ switched to ONNX
+            OnnxImageAnalysisService onnxImageAnalysisService,
+            ImageAnalysisService heuristicService,
             EnhancedWaterCalculationService enhancedWaterCalculationService,
             IWebHostEnvironment environment,
             ILogger<ImageAnalysisController> logger)
         {
             _context = context;
             _onnxImageAnalysisService = onnxImageAnalysisService;
+            _heuristicService = heuristicService;
             _enhancedWaterCalculationService = enhancedWaterCalculationService;
             _environment = environment;
             _logger = logger;
@@ -38,7 +41,7 @@ namespace AquaBotApi.Controllers
 
         /// <summary>
         /// Upload and analyze soil/crop image with ML + weather-based calculations
-        /// POST: api/imageanalysis/analyze
+        /// Saves result in DB
         /// </summary>
         [HttpPost("analyze")]
         public async Task<ActionResult<ImageAnalysisResponseDto>> AnalyzeImage([FromForm] ImageUploadDto dto)
@@ -61,12 +64,20 @@ namespace AquaBotApi.Controllers
 
                 var fileName = await SaveUploadedImageAsync(dto.Image);
 
-                // ✅ Use ONNX model for image analysis
+                // ✅ Use ONNX model
                 var analysisResult = _onnxImageAnalysisService.AnalyzeImage(dto.Image, dto.CropType);
 
-                // ✅ Add weather-based recommendation
+                // ✅ Fallback if low confidence
+                if (analysisResult.Confidence < 60)
+                {
+                    _logger.LogWarning("Low confidence ({Confidence}%) from ONNX model. Falling back to heuristic service.", analysisResult.Confidence);
+                    analysisResult = await _heuristicService.AnalyzeImageAsync(dto.Image, dto.CropType);
+                }
+
+                // ✅ Use provided location (fallback Lahore)
+                var location = dto.FieldLocation ?? "Lahore";
                 var enhancedRecommendation = await _enhancedWaterCalculationService
-                    .CalculateFromImageAndWeatherAsync(analysisResult, "Lahore", dto.CropType ?? string.Empty, fieldArea);
+                    .CalculateFromImageAndWeatherAsync(analysisResult, location, dto.CropType ?? string.Empty, fieldArea);
 
                 // ✅ Save record in DB
                 var dbRecord = new ImageAnalysisResult
@@ -76,7 +87,8 @@ namespace AquaBotApi.Controllers
                     SoilCondition = analysisResult.SoilCondition,
                     EstimatedMoisture = analysisResult.EstimatedMoisture,
                     CropHealth = analysisResult.CropHealth,
-                    CropType = analysisResult.CropType
+                    CropType = analysisResult.CropType,
+                    FieldLocation = location
                 };
 
                 _context.ImageAnalysisResults.Add(dbRecord);
@@ -87,16 +99,17 @@ namespace AquaBotApi.Controllers
                 return Ok(new ImageAnalysisResponseDto
                 {
                     Success = true,
-                    Message = "Image analyzed with weather data successfully (ML model)",
+                    Message = "Image analyzed with weather data successfully",
                     ImageId = dbRecord.Id,
                     ImageUrl = imageUrl,
                     ImageAnalysis = analysisResult,
+                    FieldLocation = dbRecord.FieldLocation,
                     WaterRecommendation = enhancedRecommendation
                 });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error analyzing image with ONNX model");
+                _logger.LogError(ex, "Error analyzing image");
                 return StatusCode(500, new ImageAnalysisResponseDto
                 {
                     Success = false,
@@ -105,37 +118,38 @@ namespace AquaBotApi.Controllers
             }
         }
 
+        /// <summary>
+        /// Quick farmer-friendly analysis (not saved in DB)
+        /// </summary>
         [HttpPost("analyze-simple")]
         public async Task<ActionResult<FarmerRecommendationDto>> AnalyzeSimple([FromForm] ImageUploadDto dto)
         {
             var analysisResult = _onnxImageAnalysisService.AnalyzeImage(dto.Image, dto.CropType);
-            var enhancedRecommendation = await _enhancedWaterCalculationService
-                .CalculateFromImageAndWeatherAsync(analysisResult, "Lahore", dto.CropType ?? string.Empty, dto.FieldArea);
 
-            var farmerDto = new FarmerRecommendationDto
+            if (analysisResult.Confidence < 60)
+            {
+                _logger.LogWarning("Low confidence from ONNX model. Falling back to heuristic analysis (simple).");
+                analysisResult = await _heuristicService.AnalyzeImageAsync(dto.Image, dto.CropType);
+            }
+
+            var location = dto.FieldLocation ?? "Lahore";
+            var enhancedRecommendation = await _enhancedWaterCalculationService
+                .CalculateFromImageAndWeatherAsync(analysisResult, location, dto.CropType ?? string.Empty, dto.FieldArea);
+
+            return Ok(new FarmerRecommendationDto
             {
                 SoilCondition = analysisResult.SoilCondition,
                 CropType = dto.CropType ?? "Unknown",
+                FieldLocation = dto.FieldLocation ?? "Lahore",
                 Recommendation = enhancedRecommendation.Recommendation,
-                Urgency = enhancedRecommendation.IrrigationUrgency switch
-                {
-                    IrrigationUrgency.Low => "Low",
-                    IrrigationUrgency.Medium => "Medium",
-                    IrrigationUrgency.High => "High",
-                    IrrigationUrgency.Critical => "Critical",
-                    _ => "Unknown"
-                },
+                Urgency = enhancedRecommendation.IrrigationUrgency.ToString(),
                 WaterPerSquareMeter = enhancedRecommendation.WaterPerSquareMeter,
                 TotalWaterNeeded = enhancedRecommendation.TotalWaterNeeded
-            };
-
-            return Ok(farmerDto);
+            });
         }
 
-
         /// <summary>
-        /// Get user's image analysis history
-        /// GET: api/imageanalysis/history
+        /// Get user’s past analyses
         /// </summary>
         [HttpGet("history")]
         public IActionResult GetAnalysisHistory()
@@ -152,6 +166,7 @@ namespace AquaBotApi.Controllers
                     r.EstimatedMoisture,
                     r.CropHealth,
                     r.CropType,
+                    r.FieldLocation,   // ✅ include location
                     r.CreatedAt,
                     r.FileName
                 })
@@ -161,74 +176,7 @@ namespace AquaBotApi.Controllers
             return Ok(history);
         }
 
-        /// <summary>
-        /// Get specific analysis details
-        /// GET: api/imageanalysis/{id}
-        /// </summary>
-        [HttpGet("{id}")]
-        public IActionResult GetAnalysisById(int id)
-        {
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-
-            var analysis = _context.ImageAnalysisResults
-                .Where(r => r.Id == id && r.UserId == userId)
-                .Select(r => new
-                {
-                    r.Id,
-                    r.SoilCondition,
-                    r.EstimatedMoisture,
-                    r.CropHealth,
-                    r.CropType,
-                    r.CreatedAt,
-                    r.FileName
-                })
-                .FirstOrDefault();
-
-            if (analysis == null)
-                return NotFound("Analysis not found");
-
-            return Ok(analysis);
-        }
-
-        /// <summary>
-        /// Quick analyze with ML + weather calculations (not saved in DB)
-        /// POST: api/imageanalysis/quick-analyze
-        /// </summary>
-        [HttpPost("quick-analyze")]
-        public async Task<ActionResult<ImageAnalysisResponseDto>> QuickAnalyze([FromForm] IFormFile image, [FromForm] string? cropType = null, [FromForm] double? fieldArea = null)
-        {
-            try
-            {
-                if (image == null || image.Length == 0)
-                    return BadRequest(new ImageAnalysisResponseDto { Success = false, Message = "No image file provided" });
-
-                // ✅ Use ONNX model
-                var analysisResult = _onnxImageAnalysisService.AnalyzeImage(image, cropType);
-
-                var enhancedRecommendation = await _enhancedWaterCalculationService
-                    .CalculateFromImageAndWeatherAsync(analysisResult, "Lahore", cropType ?? string.Empty, fieldArea);
-
-                return Ok(new ImageAnalysisResponseDto
-                {
-                    Success = true,
-                    Message = "Quick analysis with weather data completed (ML model)",
-                    ImageAnalysis = analysisResult,
-                    WaterRecommendation = enhancedRecommendation
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error in quick analysis with ONNX model");
-                return StatusCode(500, new ImageAnalysisResponseDto
-                {
-                    Success = false,
-                    Message = "Internal server error. Please try again later."
-                });
-            }
-        }
-
         #region Private Helpers
-
         private async Task<string> SaveUploadedImageAsync(IFormFile image)
         {
             var uploadsPath = Path.Combine(_environment.WebRootPath ?? "wwwroot", "uploads", "images");
@@ -258,7 +206,6 @@ namespace AquaBotApi.Controllers
 
             return fileName;
         }
-
         #endregion
     }
 }

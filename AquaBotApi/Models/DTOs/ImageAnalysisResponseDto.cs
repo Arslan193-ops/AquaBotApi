@@ -9,11 +9,12 @@ namespace AquaBotApi.Models.DTOs
         public string Message { get; set; } = string.Empty;
 
         // ✅ DB Reference
-        public int? ImageId { get; set; }
-        public string? ImageUrl { get; set; }
+        public int ImageId { get; set; }
+        public string ImageUrl { get; set; } = string.Empty;
 
         // ✅ Analysis Results
         public ImageAnalysisDto ImageAnalysis { get; set; } = new();
+        public string? FieldLocation { get; set; }
 
         // ✅ Water Recommendation
         public WaterRecommendationResult WaterRecommendation { get; set; } = new();
