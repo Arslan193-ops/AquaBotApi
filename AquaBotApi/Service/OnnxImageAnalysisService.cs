@@ -16,7 +16,7 @@ namespace AquaBotApi.Service
         {
             _logger = logger;
             var modelPath = config.GetValue<string>("SoilModel:OnnxPath")
-                            ?? Path.Combine(AppContext.BaseDirectory, "models", "soil_model_v1.onnx");
+                            ?? Path.Combine(AppContext.BaseDirectory, "model", "soil_model_v1.onnx");
             _session = new InferenceSession(modelPath);
             _logger.LogInformation("Loaded ONNX model: " + modelPath);
         }
