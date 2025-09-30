@@ -26,6 +26,7 @@
 
         public IrrigationUrgency IrrigationUrgency { get; set; }
         public string Recommendation { get; set; } = string.Empty;
+        public string DebugDetails { get; set; } = string.Empty;
         public DateTime NextCheckDate { get; set; }
         public DateTime CalculatedAt { get; set; }
     }

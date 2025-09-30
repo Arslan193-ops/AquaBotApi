@@ -677,19 +677,21 @@ namespace AquaBotApi.Services
 
             // 5) urgency and recommendation text (with breakdown)
             var urgency = DetermineUrgency(imageData, weather, waterNeed);
-            var recommendationText = BuildRecommendationText(
-                waterNeed,
-                fieldAreaM2,
-                cropType,
-                soilType,
-                moisture,
-                baseWater,
-                soilRetention,
-                cropKc,
-                evapFactor,
-                weatherMultiplier,
-                rainAdjustmentFactor,
-                urgency);
+            var (farmerText, technicalText) = BuildRecommendationText(
+    waterNeed,
+    fieldAreaM2,
+    cropType,
+    soilType,
+    moisture,
+    baseWater,
+    soilRetention,
+    cropKc,
+    evapFactor,
+    weatherMultiplier,
+    rainAdjustmentFactor,
+    urgency);
+
+
 
             // Next check scheduling: urgency-based (Critical -> few hours, Low -> day or more)
             var nextCheck = CalculateNextCheckDate(urgency, weather);
@@ -711,10 +713,12 @@ namespace AquaBotApi.Services
                 TotalWaterNeeded = totalWater,
 
                 IrrigationUrgency = urgency,
-                Recommendation = recommendationText,
+                Recommendation = farmerText,
+                DebugDetails = technicalText,   // ✅ NEW
                 NextCheckDate = nextCheck,
                 CalculatedAt = DateTime.UtcNow
             };
+
         }
 
         // ----------------- Calculation helpers -----------------
@@ -849,38 +853,41 @@ namespace AquaBotApi.Services
             };
         }
 
-        private string BuildRecommendationText(
-            double waterNeed,
-            double? fieldArea,
-            string cropType,
-            string soilType,
-            double moisture,
-            double baseWater,
-            double soilRetention,
-            double cropKc,
-            double evapFactor,
-            double weatherMultiplier,
-            double rainAdjustment,
-            IrrigationUrgency urgency)
+        private (string FarmerText, string TechnicalText) BuildRecommendationText(
+    double waterNeed,
+    double? fieldArea,
+    string cropType,
+    string soilType,
+    double moisture,
+    double baseWater,
+    double soilRetention,
+    double cropKc,
+    double evapFactor,
+    double weatherMultiplier,
+    double rainAdjustment,
+    IrrigationUrgency urgency)
         {
+            // Farmer-friendly message
             var totalText = fieldArea.HasValue
-                ? $"{waterNeed} L/m² (≈ {Math.Round(waterNeed * fieldArea.Value, 1)} L total)"
+                ? $"{Math.Round(waterNeed * fieldArea.Value, 1)} L total (~{waterNeed} L/m²)"
                 : $"{waterNeed} L/m²";
 
-            var parts = new List<string>
+            var urgencyWindow = urgency switch
             {
-                $"Apply {totalText} within the next 24 hours (urgency: {urgency}).",
-                $"Breakdown: base_from_moisture={baseWater} L/m² (moisture={moisture}%).",
-                $"soil_factor={soilRetention} (soil='{soilType}'), crop_Kc={cropKc} (crop='{cropType}'), evap_factor={evapFactor}, weather_mult={weatherMultiplier}."
+                IrrigationUrgency.Critical => "within 6 hours",
+                IrrigationUrgency.High => "within 12 hours",
+                IrrigationUrgency.Medium => "within 24 hours",
+                _ => "within 36 hours"
             };
 
-            if (rainAdjustment > 0)
-                parts.Add($"Reduced by rain adjustment {rainAdjustment * 100.0:F0}% due to recent/forecast precipitation.");
+            var farmerText = $"For {cropType} on {soilType} soil: Apply {totalText} {urgencyWindow} (urgency: {urgency}).";
 
-            parts.Add("Re-check on " + CalculateNextCheckDate(urgency, null).ToString("u")); // universal sortable
+            // Technical details (for experts / debugging)
+            var technicalText = $"Breakdown → base={baseWater}, soilFactor={soilRetention}, cropKc={cropKc}, evap={evapFactor}, weatherMult={weatherMultiplier}, rainAdj={rainAdjustment}. Moisture={moisture}%.";
 
-            return string.Join(" ", parts);
+            return (farmerText, technicalText);
         }
+
 
         private WeatherDto GetDefaultWeather()
         {
