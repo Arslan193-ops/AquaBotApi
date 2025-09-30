@@ -18,5 +18,8 @@ namespace AquaBotApi.Models.DTOs
 
         // ✅ Water Recommendation
         public WaterRecommendationResult WaterRecommendation { get; set; } = new();
+
+        public string? FarmerRecommendation => WaterRecommendation?.Recommendation;
+        public string? DebugDetails => WaterRecommendation?.DebugDetails;
     }
 }

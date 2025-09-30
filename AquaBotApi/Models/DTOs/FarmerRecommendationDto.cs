@@ -8,7 +8,6 @@
         public string Urgency { get; set; } = string.Empty; // e.g., "Low", "Medium", "High"
         public double WaterPerSquareMeter { get; set; }
         public string? FieldLocation { get; set; }
-
         public double? TotalWaterNeeded { get; set; }
     }
 }
